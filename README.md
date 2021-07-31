@@ -222,6 +222,232 @@ Linux 2.1 版本 提供了 sendFile 函数，其基本原理如下：数据根�
     > 5)  handler 通过read读取数据，分发给后面的worker线程处理
     > 6) worker 线程池分配独立的worker线程进行业务处理，并返回结果
 
+### 实现类讲解
+
+#### BootStrap、ServerBootStrap
+
+以上两个类的区别就是ServerBootStrap是服务器端的引导类，而BootStrap是客户端的引导类，他们的目的是构建一个完成的Netty程序。
+
+##### 常用的方法
+
+###### 服务器端： 
+
+```java
+// 该方法用于设置主的Reactor和子Reactor做一个关联
+public ServerBootstrap group(EventLoopGroup parentGroup, EventLoopGroup childGroup) ;
+// 用于设置服务器端的通道实现
+public B channel(Class<? extends C> channelClass);
+// 用于添加 ServerChannel 配置
+public <T> B option(ChannelOption<T> option, T value); 
+// 用于添加 接收到的通道 配置
+public <T> ServerBootstrap childOption(ChannelOption<T> childOption, T value);
+// 用于设置 接收到的通道进行添加处理器
+public ServerBootstrap childHandler(ChannelHandler childHandler);
+// 用于设置本机服务端绑定的端口
+public ChannelFuture bind(int inetPort);
+```
+
+###### 客户端
+
+```java
+// 设置客户端绑定的 事件组
+public B group(EventLoopGroup group);
+// 用于设置服务器端的通道实现
+public B channel(Class<? extends C> channelClass);
+// 用于添加 ServerChannel 配置
+public <T> B option(ChannelOption<T> option, T value); 
+// 设置通道的处理器
+public B handler(ChannelHandler handler);
+// 设置客户端连接的地址和端口
+public ChannelFuture connect(String inetHost, int inetPort);
+```
+
+#### Future、ChannelFuture
+
+Netty中所有的I0操作都是异步的，不能立刻得知消息是否被正确处理。但是可以过一会等它执行完成或者直接注册一个监听，具体的实现就是通过Future 和ChannelFutures, 他们可以注册一个监听，当操作执行成功或失败时监听会自动触发注册的监听事件
+
+##### 常用方法
+
+```java
+// 返回当前具有IO的channel
+Channel channel();
+// 等待操作异步执行完毕
+ChannelFuture sync();
+// 同步
+ChannelFuture syncUninterruptibly();
+// 等待执行完毕
+ChannelFuture await() throws InterruptedException;
+// 添加一个处理的监听事件
+ChannelFuture addListener(GenericFutureListener<? extends Future<? super Void>> listener);
+// 移除一个监听事件
+ChannelFuture removeListener(GenericFutureListener<? extends Future<? super Void>> listener);
+```
+
+#### Channel
+
+1) Netty网络通信的组件，能够用于执行网络I/O 操作。
+2) 通过Channel可获得当前网络连接的通道的状态
+3) 通过 Channel可获得网络连接的配置参数( 例如接收缓冲区大小)
+4) Channel 提供异步的网络I/O 操作(如建立连接，读写，绑定端口)，异步调用意味着任何I/O 调用都将立即返
+   回，并且不保证在调用结束时所请求的I/O 操作已完成
+5) 调用 立即返回一个ChannelFuture 实例，通过注册监听器到ChannelFuture上， 可以I/O操作成功、失败或取
+   消时回调通知调用方
+6) 支持关联I/O操作与对应的处理程序
+7) 不同协议、 不同的阻塞类型的连接都有不同的Channel 类型与之对应，常用的Channel 类型:
+   NioSocketChannel,异步的客户端TCP Socket连接。
+   NioServerSocketChannel,异步的服务器端TCP Socket连接。
+   NioDatagramChannel,异步的UDP连接。
+   NioSctpChannel,异步的客户端Sctp 连接。
+   NioSctpServerChannel,异步的Sctp 服务器端连接，这些通道涵盖了UDP 和TCP网络IO以及文件IO。
+
+#### Selector
+
+1) Netty 基于Selector 对象实现I/O 多路复用，通过Selector 一个线程可以监听多个连接的Channel 事件。
+2) 当向一个Selector中注册Channel后，Selector内部的机制就可以自动不断地查询(Select)这些注册的Channel是否有已就绪的I/O 事件(例如可读，可写，网络连接完成等)，这样程序就可以很简单地使用一个线程高效地管理多个Channel
+
+#### ChannelHandler极其实现类
+
+ChannelHandler是-一个接口，处理I/O事件或拦截I/O操作，并将其转发到其ChannelPipeline(业 务处理链)中的下一个处理程序。
+
+其实现类如下图：
+
+![](http://image.tinx.top/img20210731134903.png)
+
++ ChannelInBoundHandler 用于处理进站的IO请求
++ ChannelInBoundHandlerAdapter 用于处理进站的IO请求适配器
++ ChannelOutBoundHandler 用于处理出站的IO请求
++ ChannelOutBoundHandlerAdapter 用于处理出站的IO请求适配器
++ ChannelDuplexBoundHandler 用于处理出/入站的IO请求
+
+我们一般业务会继承 ChannelInBoundHandler 类，重写相关方法，达到业务需求，常用的方法有:
+
+```java
+// 通道就绪事件
+void channelActive(ChannelHandlerContext ctx) throws Exception;
+// 通道空闲状态
+void channelInactive(ChannelHandlerContext ctx) throws Exception;
+// 通道事件被触发 - 读取事件
+void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception;
+// 通道读取事件完毕
+void channelReadComplete(ChannelHandlerContext ctx) throws Exception;
+// 用户事件被触发
+void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception;
+// 出现异常
+void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
+// 信息每一次读取事件
+protected abstract void channelRead0(ChannelHandlerContext ctx, I msg) throws Exception;
+```
+
+#### Pipeline和ChannelPipeline
+
+1) ChannelPipeline 是一一个Handler 的集合，它负责处理和拦截inbound 或者outbound 的事件和操作，相当于
+一个贯穿Netty 的链。(也可以这样理解: ChannelPipeline 是保存ChannelHandler 的List, 用于处理或拦截
+Channel的入站事件和出站操作)
+2) ChannelPipeline 实现了一种高级形式的拦截过滤器模式，使用户可以完全控制事件的处理方式，以及Channel
+中各个的ChannelHandler 如何相互交互
+3) 在Netty 中每个Channel 都有且仅有一个ChannelPipeline 与之对应，它们的组成关系如下
+
+![](http://image.tinx.top/img20210731141932.png)
+
+一个Channel包含了-个ChannelPipeline,而ChannelPipeline 中又维护了一个 由ChannelHandlerContext组成的双向链表，并且每个ChannelHandlerContext中又关联着一个ChannelHandler
+入站事件和出站事件在一个双向链表中，入站事件会从链表head往后传递到最后一个入站的handler,出站事件会从链表tail往前传递到最前一一个出站的handler,两种类型的handler互不干扰
+
+##### 常用方法
+
+ChannelPipeline addirt(ChanneHande... handlers), 把一个业 务处理类( handler) 添加到链中的第一个位置
+ChannelPipeline addL ast(ChannelHandler.. handlers)，把一个业 务处理类(handler)添加到链中的最后 -一个位 置
+
+#### ChannelHandlerContext
+
+1. 保存Channel 相关的所有上下文信息，同时关联一个ChannelHandler 对象
+2. ChannelHandlerContext中包含一个具体的事件处理器ChannelHandler，同时ChannelHandlerContext中也绑定了对应的pipeline 和Channel 的信息，方便对ChannelHandler 进行调用.
+
+常用方法：
+
+```java
+// 刷新
+ChannelHandlerContext flush();
+// 获取处理器链路
+ChannelPipeline pipeline();
+// 刷新写入
+public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise);
+```
+
+#### ChannelOption
+
+Netty 在创建Channel 实例后，一 般都需要设置ChannelOption 参数
+
+相关参数：
+
+> 1、ChannelOption.SO_BACKLOG
+>
+> ​     ChannelOption.SO_BACKLOG对应的是tcp/ip协议listen函数中的backlog参数，函数listen(int socketfd,int backlog)用来初始化服务端可连接队列，服务端处理客户端连接请求是顺序处理的，所以同一时间只能处理一个客户端连接，多个客户端来的时候，服务端将不能处理的客户端连接请求放在队列中等待处理，backlog参数指定了队列的大小
+>
+> 2、ChannelOption.SO_REUSEADDR
+>
+> ​      ChanneOption.SO_REUSEADDR对应于套接字选项中的SO_REUSEADDR，这个参数表示允许重复使用本地地址和端口，
+>
+> ​      比如，某个服务器进程占用了TCP的80端口进行监听，此时再次监听该端口就会返回错误，使用该参数就可以解决问题，该参数允许共用该端口，这个在服务器程序中比较常使用，
+>
+> ​      比如某个进程非正常退出，该程序占用的端口可能要被占用一段时间才能允许其他进程使用，而且程序死掉以后，内核一需要一定的时间才能够释放此端口，不设置SO_REUSEADDR就无法正常使用该端口。
+>
+> 3、ChannelOption.SO_KEEPALIVE
+>
+> ​      Channeloption.SO_KEEPALIVE参数对应于套接字选项中的SO_KEEPALIVE，该参数用于设置TCP连接，当设置该选项以后，连接会测试链接的状态，这个选项用于可能长时间没有数据交流的连接。当设置该选项以后，如果在两小时内没有数据的通信时，TCP会自动发送一个活动探测数据报文。
+>
+> 4、ChannelOption.SO_SNDBUF和ChannelOption.SO_RCVBUF
+>
+> ​      ChannelOption.SO_SNDBUF参数对应于套接字选项中的SO_SNDBUF，ChannelOption.SO_RCVBUF参数对应于套接字选项中的SO_RCVBUF这两个参数用于操作接收缓冲区和发送缓冲区的大小，接收缓冲区用于保存网络协议站内收到的数据，直到应用程序读取成功，发送缓冲区用于保存发送数据，直到发送成功。
+>
+> 5、ChannelOption.SO_LINGER
+>
+> ​      ChannelOption.SO_LINGER参数对应于套接字选项中的SO_LINGER,Linux内核默认的处理方式是当用户调用close（）方法的时候，函数返回，在可能的情况下，尽量发送数据，不一定保证会发生剩余的数据，造成了数据的不确定性，使用SO_LINGER可以阻塞close()的调用时间，直到数据完全发送
+>
+> 6、ChannelOption.TCP_NODELAY
+>
+> ​      ChannelOption.TCP_NODELAY参数对应于套接字选项中的TCP_NODELAY,该参数的使用与Nagle算法有关,Nagle算法是将小的数据包组装为更大的帧然后进行发送，而不是输入一次发送一次,因此在数据包不足的时候会等待其他数据的到了，组装成大的数据包进行发送，虽然该方式有效提高网络的有效负载，但是却造成了延时，而该参数的作用就是禁止使用Nagle算法，使用于小数据即时传输，于TCP_NODELAY相对应的是TCP_CORK，该选项是需要等到发送的数据量最大的时候，一次性发送数据，适用于文件传输。
+>
+> 7、IP_TOS
+>
+> IP参数，设置IP头部的Type-of-Service字段，用于描述IP包的优先级和QoS选项。
+>
+> 8、ALLOW_HALF_CLOSURE
+>
+> Netty参数，一个连接的远端关闭时本地端是否关闭，默认值为False。值为False时，连接自动关闭；为True时，触发ChannelInboundHandler的userEventTriggered()方法，事件为ChannelInputShutdownEvent。
+
+##### TCP参数表
+
+![](http://image.tinx.top/img20210731143842.png)
+
+![](http://image.tinx.top/img20210731143923.png)
+
+#### EventGroupLoop极其实现类NioEventGroupLoop
+
+1) EventLoopGroup 是一组EventLoop 的抽象, Netty 为了更好的利用多核CPU资源，一般会有多个EventLoop同时工作，每个EventLoop 维护着一个Selector 实例。
+2) EventLoopGroup 提供next 接口，可以从组里面按照一 定规则获取其中一个EventLoop来处理任务。在Netty服务器端编程中，我们一般都需要提供两个EventLoopGroup， 例如: BossEventLoopGroup 和WorkerEventL oopGroup。
+3) 通常一个服务 端口即一个ServerSocketChannel 对应一个 Selector 和一个EventL oop线程。BossEventLoop负责接收客户端的连接并将SocketChannel 交给WorkerEventL oopGroup来进行I0处理，如下图所示
+
+![](http://image.tinx.top/img20210731144251.png)
+
++ BossEventLoopGroup通常是一个 单线程的EventLoop, EventLoop 维护着一个注册了ServerSocketChannel的Selector实例BossEventLoop不断轮询Selector将连接事件分离出来
++ 通常是OP ACCEPT事件，然后将接收到的SocketChannel交给WorkerEventLoopGroup
++ WorkerEventLoopGroup会由next选择其中一个EventLoop来将这个SocketChannel注册到其维护的Selector并对其后续的I/O事件进行处
+
+#### Unpooled
+
+这个类是用于专门操作缓冲区的工具类
+
+常用的方法：
+
+```java
+// 创建一个新的 big-endian Java 堆缓冲区，初始容量相当小，可按需无限扩展其容量。
+public static ByteBuf buffer() ;
+// 创建一个新的大端缓冲区，用于包装指定的 {@code array}。对指定数组内容的修改将对返回的缓冲区可见。
+public static ByteBuf wrappedBuffer(byte[] array);
+// 创建一个新的 big-endian 缓冲区，内容指定的是 array 方法参数的的副本
+public static ByteBuf copiedBuffer(byte[] array)
+```
+
 ### 简单的服务器端与客户端交互
 
 #### 服务端
