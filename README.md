@@ -1,102 +1,53 @@
-\* [Java集合](#java集合)
-
-\* [NIO](#nio)
-
- \* [NIO特点](#nio特点)
-
- \* [BIO的特点以及缺点](#bio的特点以及缺点)
-
-  \* [特点](#特点)
-
-  \* [缺点](#缺点)
-
- \* [NIO 文件读写](#nio-文件读写)
-
- \* [NIO聊天室](#nio聊天室)
-
-  \* [NIO Server](#nio-server)
-
-  \* [Nio Client](#nio-client)
-
- \* [NIO零拷贝问题](#nio零拷贝问题)
-
-  \* [mmap](#mmap)
-
-  \* [sendFile](#sendfile)
-
-  \* [mmap 和 sendFile 的区别](#mmap-和-sendfile-的区别)
-
- \* [Netty](#netty)
-
-  \* [前言](#前言)
-
-   \* [Reactor模型](#reactor模型)
-
-  \* [实现类讲解](#实现类讲解)
-
-   \* [BootStrap、ServerBootStrap](#bootstrapserverbootstrap)
-
-​    \* [常用的方法](#常用的方法)
-
-​     \* [服务器端：](#服务器端)
-
-​     \* [客户端](#客户端)
-
-   \* [Future、ChannelFuture](#futurechannelfuture)
-
-​    \* [常用方法](#常用方法)
-
-   \* [Channel](#channel)
-
-   \* [Selector](#selector)
-
-   \* [ChannelHandler极其实现类](#channelhandler极其实现类)
-
-   \* [Pipeline和ChannelPipeline](#pipeline和channelpipeline)
-
-​    \* [常用方法](#常用方法-1)
-
-   \* [ChannelHandlerContext](#channelhandlercontext)
-
-   \* [ChannelOption](#channeloption)
-
-​    \* [TCP参数表](#tcp参数表)
-
-   \* [EventGroupLoop极其实现类NioEventGroupLoop](#eventgrouploop极其实现类nioeventgrouploop)
-
-   \* [Unpooled](#unpooled)
-
-  \* [简单的服务器端与客户端交互](#简单的服务器端与客户端交互)
-
-   \* [服务端](#服务端)
-
-   \* [客户端](#客户端-1)
-
-   \* [效果图](#效果图)
-
-  \* [Http服务器](#http服务器)
-
-   \* [效果图](#效果图-1)
-
-  \* [聊天室](#聊天室)
-
-   \* [服务端](#服务端-1)
-
-   \* [客户端](#客户端-2)
-
-   \* [效果图](#效果图-2)
-
-\* [Thread](#thread)
-
-\* [BigData](#bigdata)
-
- \* [Hive](#hive)
-
- \* [HBase](#hbase)
-
- \* [Spark](#spark)
-
- \* [Flink](#flink)
+* [Java集合](#java集合)
+* [NIO](#nio)
+  * [NIO特点](#nio特点)
+  * [BIO的特点以及缺点](#bio的特点以及缺点)
+    * [特点](#特点)
+    * [缺点](#缺点)
+  * [NIO 文件读写](#nio-文件读写)
+  * [NIO聊天室](#nio聊天室)
+    * [NIO Server](#nio-server)
+    * [Nio Client](#nio-client)
+  * [NIO零拷贝问题](#nio零拷贝问题)
+    * [mmap](#mmap)
+    * [sendFile](#sendfile)
+    * [mmap 和 sendFile 的区别](#mmap-和-sendfile-的区别)
+  * [Netty](#netty)
+    * [前言](#前言)
+      * [Reactor模型](#reactor模型)
+    * [实现类讲解](#实现类讲解)
+      * [BootStrap、ServerBootStrap](#bootstrapserverbootstrap)
+        * [常用的方法](#常用的方法)
+          * [服务器端：](#服务器端)
+          * [客户端](#客户端)
+      * [Future、ChannelFuture](#futurechannelfuture)
+        * [常用方法](#常用方法)
+      * [Channel](#channel)
+      * [Selector](#selector)
+      * [ChannelHandler极其实现类](#channelhandler极其实现类)
+      * [Pipeline和ChannelPipeline](#pipeline和channelpipeline)
+        * [常用方法](#常用方法-1)
+      * [ChannelHandlerContext](#channelhandlercontext)
+      * [ChannelOption](#channeloption)
+        * [TCP参数表](#tcp参数表)
+      * [EventGroupLoop极其实现类NioEventGroupLoop](#eventgrouploop极其实现类nioeventgrouploop)
+      * [Unpooled](#unpooled)
+    * [简单的服务器端与客户端交互](#简单的服务器端与客户端交互)
+      * [服务端](#服务端)
+      * [客户端](#客户端-1)
+      * [效果图](#效果图)
+    * [Http服务器](#http服务器)
+      * [效果图](#效果图-1)
+    * [聊天室](#聊天室)
+      * [服务端](#服务端-1)
+      * [客户端](#客户端-2)
+      * [效果图](#效果图-2)
+* [Thread](#thread)
+* [BigData](#bigdata)
+  * [Hive](#hive)
+  * [HBase](#hbase)
+  * [Spark](#spark)
+  * [Flink](#flink)
 
 # Java集合
 
