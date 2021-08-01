@@ -32,6 +32,14 @@
         * [TCP参数表](#tcp参数表)
       * [EventGroupLoop极其实现类NioEventGroupLoop](#eventgrouploop极其实现类nioeventgrouploop)
       * [Unpooled](#unpooled)
+    * [TCP的粘包/拆包问题](#tcp的粘包拆包问题)
+      * [什么是TCP的粘包拆包？](#什么是tcp的粘包拆包)
+      * [为什么会发生TCP粘包、拆包？](#为什么会发生tcp粘包拆包)
+      * [粘包、拆包解决办法](#粘包拆包解决办法)
+      * [Netty解决粘包拆包的方法](#netty解决粘包拆包的方法)
+        * [自定义协议包](#自定义协议包)
+        * [编码器](#编码器)
+        * [解码器](#解码器)
     * [简单的服务器端与客户端交互](#简单的服务器端与客户端交互)
       * [服务端](#服务端)
       * [客户端](#客户端-1)
@@ -494,6 +502,107 @@ public static ByteBuf wrappedBuffer(byte[] array);
 // 创建一个新的 big-endian 缓冲区，内容指定的是 array 方法参数的的副本
 public static ByteBuf copiedBuffer(byte[] array)
 ```
+
+
+
+### TCP的粘包/拆包问题
+
+#### 什么是TCP的粘包拆包？
+
+> 因为网络存在着各种不确定性，在网络传输的数据存在着断断续续的问题，如下图：
+>
+> 正常状态：
+>
+> 接收端正常收到两个数据包，即没有发生拆包和粘包的现象。
+>
+> ![](http://image.tinx.top/img20210801113733.png)
+>
+> 粘包：
+>
+> 接收端只收到一个数据包，由于TCP是不会出现丢包的，所以这一个数据包中包含了发送端发送的两个数据包的信息，这种现象即为粘包。这种情况由于接收端不知道这两个数据包的界限，所以对于接收端来说很难处理。
+>
+> ![](http://image.tinx.top/img20210801113749.png)
+>
+> 拆包：
+>
+> 这种情况有两种表现形式，如下图。接收端收到了两个数据包，但是这两个数据包要么是不完整的，要么就是多出来一块，这种情况即发生了拆包和粘包。这两种情况如果不加特殊处理，对于接收端同样是不好处理的。
+>
+> ![](http://image.tinx.top/img20210801113815.png)
+
+#### 为什么会发生TCP粘包、拆包？
+
+发生TCP粘包、拆包主要是由于下面一些原因：
+
+- **应用程序写入的数据大于socket缓冲区大小**，这将会发生**拆包。**
+- 进行MSS（最大报文长度）大小的TCP分段，当TCP报文长度-TCP头部长度>MSS的时候将发生**拆包。**
+- **应用程序写入数据小于socket缓冲区大小，网卡将应用多次写入的数据发送到网络上**，这将会发生**粘包。**
+- 接收方法不及时读取socket缓冲区数据，这将发生**粘包。**
+
+#### 粘包、拆包解决办法
+
+TCP本身是面向流的，作为网络服务器，如何从这源源不断涌来的数据流中拆分出或者合并出有意义的信息呢？通常会有以下一些常用的方法：
+
+- 1、发送端给每个数据包添加包首部，首部中应该至少包含数据包的长度，这样接收端在接收到数据后，通过读取包首部的长度字段，便知道每一个数据包的实际长度了。
+- 2、发送端将每个数据包封装为固定长度（不够的可以通过补0填充），这样接收端每次从接收缓冲区中读取固定长度的数据就自然而然的把每个数据包拆分开来。
+- 3、可以在数据包之间设置边界，如添加特殊符号，这样，接收端通过这个边界就可以将不同的数据包拆分开。
+
+#### Netty解决粘包拆包的方法
+
+[相关源码](./src/main/java/com/wills/netty/chapter5_tcp_coder)
+
+##### 自定义协议包
+
+Netty解决拆包粘包的方法就是自己创建一个 **编码**、**解码**，然后编码解码的对象就是一个带长度头的对象的协议包，示例如下：
+
+```java
+@Data
+public class WillsProtocol {
+    // 关键点！用于对代表这个对象的字节长度，在服务器解析时会首先读取这个len，然后读取特定len长度的字节
+    private int len;
+    // 协议包的数据，指代要发送的数据本题
+    private byte[] content;
+}
+```
+
+##### 编码器
+
+```java
+@Slf4j
+public class MyObjectEncoder extends MessageToByteEncoder<WillsProtocol> {
+
+
+    @Override
+    protected void encode(ChannelHandlerContext ctx, WillsProtocol msg, ByteBuf out) throws Exception {
+        log.info("编码方法被调用了！");
+        out.writeInt(msg.getLen());
+        out.writeBytes(msg.getContent());
+    }
+}
+```
+
+##### 解码器
+
+```java
+@Slf4j
+public class MyObjectDecoder extends ReplayingDecoder<Void> {
+    @Override
+    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        int len = in.readInt();
+        byte[] content = new byte[len];
+        in.readBytes(content);
+
+        WillsProtocol protocol = new WillsProtocol(len,content);
+
+        out.add(protocol);
+
+        log.info("调用了解码方法");
+    }
+}
+```
+
+
+
+
 
 ### 简单的服务器端与客户端交互
 
