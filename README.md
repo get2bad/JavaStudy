@@ -15,11 +15,23 @@
       * [Netty](#netty)
          * [前言](#前言)
             * [Reactor模型](#reactor模型)
-         * [Netty流程](#netty流程)
+         * [Netty流程及源码解读](#netty流程及源码解读)
             * [启动流程](#启动流程)
+               * [总体流程](#总体流程)
+               * [启动流程源码解读](#启动流程源码解读)
             * [接受连接OP_ACCEPT请求流程](#接受连接op_accept请求流程)
+               * [总体流程](#总体流程-1)
+               * [相关源码](#相关源码)
             * [ChannelSocket的PipeLine调度handler流程](#channelsocket的pipeline调度handler流程)
+               * [总体流程](#总体流程-2)
+               * [相关源码](#相关源码-1)
             * [心跳流程](#心跳流程)
+               * [总体流程](#总体流程-3)
+               * [相关源码](#相关源码-2)
+               * [总结](#总结)
+            * [handler 中加入线程池和 Context 中添加线程池的源码剖析](#handler-中加入线程池和-context-中添加线程池的源码剖析)
+               * [两种解决方式](#两种解决方式)
+               * [要如何选择两种方式？](#要如何选择两种方式)
          * [实现类讲解](#实现类讲解)
             * [BootStrap、ServerBootStrap](#bootstrapserverbootstrap)
                * [常用的方法](#常用的方法)
@@ -36,6 +48,7 @@
             * [ChannelOption](#channeloption)
                * [TCP参数表](#tcp参数表)
             * [EventGroupLoop极其实现类NioEventGroupLoop](#eventgrouploop极其实现类nioeventgrouploop)
+               * [EventLoop](#eventloop)
             * [Unpooled](#unpooled)
          * [TCP的粘包/拆包问题](#tcp的粘包拆包问题)
             * [什么是TCP的粘包拆包？](#什么是tcp的粘包拆包)
@@ -284,9 +297,11 @@ Linux 2.1 版本 提供了 sendFile 函数，其基本原理如下：数据根�
 
 
 
-### Netty流程
+### Netty流程及源码解读
 
 #### 启动流程
+
+##### 总体流程
 
 1) 创建 2 个 EventLoopGroup 线程池数组。数组默认大小 CPU*2，方便 chooser 选择线程池时提高性能 
 
@@ -298,9 +313,172 @@ Linux 2.1 版本 提供了 sendFile 函数，其基本原理如下：数据根�
 
 5) 在 register0 方法成功以后调用在 dobind 方法中调用 doBind0 方法，该方法会 调用 NioServerSocketChannel的 doBind 方法对 JDK 的 channel 和端口进行绑定，完成 Netty 服务器的所有启动，并开始监听连接事件
 
+##### 启动流程源码解读
+
+```java
+// dobind方法
+private ChannelFuture doBind(final SocketAddress localAddress) {
+  			// 调用下方的 initAndRegister 初始化并且注册方法
+        final ChannelFuture regFuture = initAndRegister();
+  			// 拿到这个 future 下的 channel 
+        final Channel channel = regFuture.channel();
+  			// 如果有错误，直接返回
+        if (regFuture.cause() != null) {
+            return regFuture;
+        }
+				// 如果完成了 没有错误
+        if (regFuture.isDone()) {
+            // 创建一个 Promise
+            ChannelPromise promise = channel.newPromise();
+          	// 遍历这个 channel 的 EventLoop
+          	// 以下就是这个方法的内容，就是进行端口绑定，然后再添加一个在遇到错误关闭的监听器
+          	/*
+          		if (regFuture.isSuccess()) {channel.bind(localAddress,promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+                } else {
+                    promise.setFailure(regFuture.cause());
+                }
+          	*/
+            doBind0(regFuture, channel, localAddress, promise);
+            return promise;
+        } else {
+          	// 如果没有完成,就手动创建一个 promise
+            final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+          	// 然后给这个  future添加一个监听器
+            regFuture.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    Throwable cause = future.cause();
+                    if (cause != null) {
+                      	// 遇到错误就设置错误的 Throwable
+                        promise.setFailure(cause);
+                    } else {
+                        // 如果错误的 cause为Null，就重新注册一次，和上面代码一样
+                        promise.registered();
+												// 重新绑定
+                        doBind0(regFuture, channel, localAddress, promise);
+                    }
+                }
+            });
+            return promise;
+        }
+    }
+
+// initAndRegister 方法
+final ChannelFuture initAndRegister() {
+  			// 初始化一个 channel 对象
+        Channel channel = null;
+        try {
+          	// 从工厂方法中 获取一个 channel
+            channel = channelFactory.newChannel();
+            init(channel);
+        } catch (Throwable t) {
+            // 初始化channel 进行相关的处理 代码略
+        }
+
+  			// 注册 channel 
+        ChannelFuture regFuture = config().group().register(channel);
+  			// 如果出错，就进行 关闭通道 等操作
+        if (regFuture.cause() != null) {
+            if (channel.isRegistered()) {
+                channel.close();
+            } else {
+                channel.unsafe().closeForcibly();
+            }
+        }
+				// 不出错就返回这个future，futrure可以进行异步sync()操作
+        return regFuture;
+    }
+
+// dobind0方法就是上面的 dobind方法会调用的，这个是 netty启动的关键方法
+private static void doBind0(final ChannelFuture regFuture, final Channel channel,
+            final SocketAddress localAddress, final ChannelPromise promise) {
+        // 直接低啊用 eventLoop （默认是NioEventLoop）的execute方法
+        channel.eventLoop().execute(new Runnable() {
+            @Override
+            public void run() {
+                if (regFuture.isSuccess()) {
+                    channel.bind(localAddress, promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
+                } else {
+                    promise.setFailure(regFuture.cause());
+                }
+            }
+        });
+    }
+
+// 最终上面的dobind0方法会绕回到 NioEventLoop里面的 自旋 run方法
+protected void run() {
+  			// 自旋算法
+        for (;;) {
+            try {
+                try {
+                  	// 判断计算策略
+                    switch (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) {
+                    // 继续策略进行自旋continue
+                    case SelectStrategy.CONTINUE:
+                        continue;
+                    case SelectStrategy.BUSY_WAIT:
+                        // 由于NIO不支持忙等待，所以切换到SELECT
+                    case SelectStrategy.SELECT:
+                        // CAS原子方法设置状态值 唤醒状态位 设置为 false 表示不唤醒，因为是繁忙等待状态
+                        select(wakenUp.getAndSet(false));
+                        // 唤醒这个 有任务的 wakenUp线程
+                        if (wakenUp.get()) {
+                            selector.wakeup();
+                        }
+                    default:
+                    }
+                } catch (IOException e) {
+                    // 错误处理，代码略
+                }
+								
+              	// 后续的步骤就是 判断是否要运行所有的任务 还是特定的selectKeys
+                cancelledKeys = 0;
+                needsToSelectAgain = false;
+              	/*
+              		当 processSelectedKeys 方法执行结束后，则按照 ioRatio 的比例执行runAllTasks 方法，默认是 IO 任务时间 和非 IO 任务时间是相同的，你也可以根据你的应用特点进行调优 。比如 非 IO 任务比较多，那么你就将ioRatio 调小一点，这样非 IO 任务就能执行的长一点。防止队列积攒过多的任务。
+              	*/
+                final int ioRatio = this.ioRatio;
+              	// 如果 io 比率是 100 ，就全力处理 选定 / 所有任务，默认是 50
+                if (ioRatio == 100) {
+                    try {
+                      	// 运行所选任务p
+                        processSelectedKeys();
+                    } finally {
+                        // 运行所有的任务
+                        runAllTasks();
+                    }
+                } else {
+                  	// 带超时时间的处理任务
+                    final long ioStartTime = System.nanoTime();
+                    try {
+                        processSelectedKeys();
+                    } finally {
+                        // Ensure we always run tasks.
+                        final long ioTime = System.nanoTime() - ioStartTime;
+                        runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
+                    }
+                }
+            } catch (Throwable t) {
+            }
+            try {
+              	// 采用二次确认的方法，判断是否关闭了所有处理的任务
+                if (isShuttingDown()) {
+                    closeAll();
+                    if (confirmShutdown()) {
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+            }
+        }
+    }
+```
+
+
+
 #### 接受连接OP_ACCEPT请求流程
 
-总体流程：
+##### 总体流程
 
 接受连接----->创建一个新的 NioSocketChannel----------->注册到一个 worker EventLoop 上--------> 注册 selecot Read 事件。 
 
@@ -310,11 +488,97 @@ Linux 2.1 版本 提供了 sendFile 函数，其基本原理如下：数据根�
 
 3) 随后执行 执行 pipeline.fireChannelRead 方法，并将自己绑定到一个 chooser 选择器选择的 workerGroup 中的 一个 EventLoop。并且注册一个 0，表示注册成功，但并没有注册读（1）事件 
 
+##### 相关源码
+
+说明：
+
+1) 检查该 eventloop 线程是否是当前线程。assert eventLoop().inEventLoop() 
+
+2) 执行 doReadMessages 方法，并传入一个 readBuf 变量，这个变量是一个 List，也就是容器。 
+
+3) 循环容器，执行 pipeline.fireChannelRead(readBuf.get(i)); 
+
+4) doReadMessages 是读取 boss 线程中的 NioServerSocketChannel 接受到的请求。并把这些请求放进容器
+
+5) 循环遍历 容器中的所有请求，调用 pipeline 的 fireChannelRead 方法，用于处理这些接受的请求或者其他事件，在 read 方法中，循环调用 ServerSocket 的 pipeline 的 fireChannelRead 方法, 开始执行 管道中的 handler 的 ChannelRead 方法
+
+```java
+// 判断java的Nio的 OP_READ / OP_ACCEPT 与 readyOps 进行 与位运算(&) 是否不等于0
+if ((readyOps & (SelectionKey.OP_READ | SelectionKey.OP_ACCEPT)) != 0 || readyOps == 0) {
+    unsafe.read();
+}
+
+// read 方法
+public void read() {
+    assert eventLoop().inEventLoop();
+		// 获取基础信息 配置信息、pipeLine
+    final ChannelConfig config = config();
+    final ChannelPipeline pipeline = pipeline();
+    final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+    allocHandle.reset(config);
+
+    boolean closed = false;
+    Throwable exception = null;
+    try {
+        try {
+            do {
+                int localRead = doReadMessages(readBuf);
+                if (localRead == 0) {
+                    break;
+                }
+                if (localRead < 0) {
+                    closed = true;
+                    break;
+                }
+
+                allocHandle.incMessagesRead(localRead);
+            } while (allocHandle.continueReading());
+        } catch (Throwable t) {
+            exception = t;
+        }
+
+      	// 读取 buf信息
+        int size = readBuf.size();
+        for (int i = 0; i < size; i ++) {
+            readPending = false;
+          	// ChannelInBoundHandler的read方法
+            pipeline.fireChannelRead(readBuf.get(i));
+        }
+        readBuf.clear();
+        allocHandle.readComplete();
+        pipeline.fireChannelReadComplete();
+				
+      	// 判断是否出现错误
+        if (exception != null) {
+            closed = closeOnReadError(exception);
+
+            pipeline.fireExceptionCaught(exception);
+        }
+				// 判断 close 关闭符号
+        if (closed) {
+            inputShutdown = true;
+            if (isOpen()) {
+                close(voidPromise());
+            }
+        }
+    } finally {
+        // 检查这里是否没有被读处理
+        if (!readPending && !config.isAutoRead()) {
+            removeReadOp();
+        }
+    }
+}
+```
+
 
 
 #### ChannelSocket的PipeLine调度handler流程
 
 每当创建一个ChannelSocket时，服务器会同步为这个ChannelSocket创建一个pipeLine链表(会自动创建一个tail节点(outBound)和head节点(inBound),形成最初的链表)，用于操作PipeLine的是 HandlerContext（处理器上下文），操作的对象就是handler，用于处理所有的IO操作
+
+[相关实现类点此跳转](#Pipeline和ChannelPipeline)
+
+##### 总体流程
 
 说明：
 
@@ -324,9 +588,283 @@ Linux 2.1 版本 提供了 sendFile 函数，其基本原理如下：数据根�
 3) Context 包装 handler，多个 Context 在 pipeline 中形成了双向链表，入站方向叫 inbound，由 head 节点开始， 出站方法叫 outbound ，由 tail 节点开始。 
 4) 而节点中间的传递通过 AbstractChannelHandlerContext 类内部的 fire 系列方法，找到当前节点的下一个节点不断的循环传播。是一个过滤器形式完成对 handler 的调度
 
+##### 相关源码
+
+创建pipeLine 会调用 AbstractChannel的带参(channel)的构造方法，然后带参构造方法会最终调用DefaultChannelPipeline的构造方法，源码如下：
+
+说明：
+
+1）将 channel 赋值给 channel 字段，用于 pipeline 操作 channel。
+
+2）创建一个 future 和 promise，用于异步回调使用。 
+
+3）创建一个 inbound 的 tailContext，创建一个既是 inbound 类型又是 outbound 类型的 headContext. 
+
+4）最后，**将两个 Context 互相连接，形成双向链表**。 
+
+5）tailContext 和 HeadContext 非常的重要，所有 pipeline 中的事件都会流经他们，
+
+```java
+protected DefaultChannelPipeline(Channel channel) {
+  	// 检查这个 channel是否为 null
+    this.channel = ObjectUtil.checkNotNull(channel, "channel");
+  	// 创建一个成功的 ChannelFuture
+  	/*
+  		SucceededChannelFuture(Channel channel, EventExecutor executor) {
+        super(channel, executor);
+    	}
+  	*/
+    succeededFuture = new SucceededChannelFuture(channel, null);
+  	/*
+  		 public VoidChannelPromise(final Channel channel, boolean fireException) {
+    		    this.channel = channel;
+    		    if (fireException) {
+    		        fireExceptionListener = new ChannelFutureListener() {
+    		            @Override
+    		            public void operationComplete(ChannelFuture future){
+    		                Throwable cause = future.cause();
+    		                if (cause != null) {
+    		                    fireException0(cause);
+    		                }
+    		            }
+    		        };
+    		    } else {
+    		        fireExceptionListener = null;
+    		    }
+    		}
+  	*/
+    voidPromise =  new VoidChannelPromise(channel, true);
+		
+  	// ☆☆☆☆☆重点！！！ 分别创建两个Context，一个是tail结尾的，一个是头部的 head☆☆☆☆
+    tail = new TailContext(this);
+    head = new HeadContext(this);
+		// 组成双向链表
+    head.next = tail;
+    tail.prev = head;
+}
+```
+
+
+
 #### 心跳流程
 
+> Netty提供了三个Handler用于检测连接的有效性，分别为：
+>
+> + IdleStateHandler
+>
+>   > 当连接的空闲时间(读 / 写) ，将会触发一个 IdleStateEvent时间，可以通过ChannelInBoundHandler的userEventTrigger方法来处理这个事件
+>
+> + ReadTimeoutHandler
+>
+>   > 如果在指定的时间没有发生读取事件，就会抛出这个异常，并且自动关闭连接，可以在exceptionCaught来处理这个异常
+>
+> + WriteTimeoutHandler
+>
+>   > 当一个写操作不能在一定时间内完成时，就会抛出这个异常，并且关闭关闭连接，可以在exceptionCaught来处理这个异常
 
+##### 总体流程
+
+1) 得到用户设置的超时时间。 
+
+2) 如果读取操作结束了（执行了 channelReadComplete 方法设置） ，就用当前时间减去给定时间和最后一次读（执操作的时间行了 channelReadComplete 方法设置），如果小于 0，就触发事件。反之，继续放入队 列。间隔时间是新的计算时间。 
+
+3) 触发的逻辑是：首先将任务再次放到队列，时间是刚开始设置的时间，返回一个 promise 对象，用于做取消操作。然后，设置 first 属性为 false ，表示，下一次读取不再是第一次了，这个属性在 channelRead 方法会被改成 true。 
+
+4) 创建一个 IdleStateEvent 类型的写事件对象，将此对象传递给用户的 UserEventTriggered 方法。完成触发事件的操作。 
+
+5) 总的来说，每次读取操作都会记录一个时间，定时任务时间到了，会计算当前时间和最后一次读的时间的间隔，如果间隔超过了设置的时间，就触发 UserEventTriggered 方法。
+
+##### 相关源码
+
+IdleStateHandler：
+
+```java
+private final boolean observeOutput; //是否考虑出站时较慢的情况。默认值是 false 
+private final long readerIdleTimeNanos;//读事件空闲时间，0 则禁用事件 
+private final long writerIdleTimeNanos;//写事件空闲时间，0 则禁用事件
+private final long allIdleTimeNanos;//读或写空闲时间，0 则禁用事件
+
+// 在 handlerAdded等一系列ChannelInBoundHandler的常用方法付中会判断channel是否被注册是否活跃，如果满足条件会调用以下的方法
+private void initialize(ChannelHandlerContext ctx) {
+    // 避免 destroy() 在延时超时前被调用
+    switch (state) {
+    case 1:
+    case 2:
+        return;
+    }
+
+    state = 1;
+    initOutputChanged(ctx);
+
+  	// 根据条件 调用不同的 定时方法
+    lastReadTime = lastWriteTime = ticksInNanos();
+    if (readerIdleTimeNanos > 0) {
+        readerIdleTimeout = schedule(ctx, new ReaderIdleTimeoutTask(ctx),
+                readerIdleTimeNanos, TimeUnit.NANOSECONDS);
+    }
+    if (writerIdleTimeNanos > 0) {
+        writerIdleTimeout = schedule(ctx, new WriterIdleTimeoutTask(ctx),
+                writerIdleTimeNanos, TimeUnit.NANOSECONDS);
+    }
+    if (allIdleTimeNanos > 0) {
+        allIdleTimeout = schedule(ctx, new AllIdleTimeoutTask(ctx),
+                allIdleTimeNanos, TimeUnit.NANOSECONDS);
+    }
+}
+```
+
+##### 总结
+
+**Netty** **的心跳机制** 
+
+1) IdleStateHandler 可以实现心跳功能，当服务器和客户端没有任何读写交互时，并超过了给定的时间，则会 触发用户 handler 的 userEventTriggered 方法。用户可以在这个方法中尝试向对方发送信息，如果发送失败，则关闭连接。
+
+2) IdleStateHandler 的实现基于 EventLoop 的定时任务，每次读写都会记录一个值，在定时任务运行的时候， 通过计算当前时间和设置时间和上次事件发生时间的结果，来判断是否空闲。 
+
+3) 内部有 3 个定时任务，分别对应读事件，写事件，读写事件。通常用户监听读写事件就足够了。 
+
+4) 同时，IdleStateHandler 内部也考虑了一些极端情况：客户端接收缓慢，一次接收数据的速度超过了设置的空闲时间。Netty 通过构造方法中的 observeOutput 属性来决定是否对出站缓冲区的情况进行判断。 
+
+5) 如果出站缓慢，Netty 不认为这是空闲，也就不触发空闲事件。但第一次无论如何也是要触发的。因为第一次无法判断是出站缓慢还是空闲。当然，出站缓慢的话，可能造成 OOM , OOM 比空闲的问题更大。 
+
+6) 所以，当你的应用出现了内存溢出，OOM 之类，并且写空闲极少发生（使用了 observeOutput 为 true），那么就需要注意是不是数据出站速度过慢。
+
+#### handler 中加入线程池和 Context 中添加线程池的源码剖析
+
+##### 两种解决方式
+
+1) 在 Netty 中做耗时的，不可预料的操作，比如数据库，网络请求，会严重影响 Netty 对 Socket 的处理速度。 
+
+2) 而解决方法就是将耗时任务添加到异步线程池中。但就添加线程池这步操作来讲，可以有 2 种方式，而且这 2 种方式实现的区别也蛮大的。 
+
+3) 处理耗时业务的第一种方式---handler 中加入线程池 
+
+   ```java
+   public class EventExcutorHandler extends SimpleChannelInboundHandler<Object> {
+   		// 使用线程池
+       private final EventExecutorGroup group = new DefaultEventLoopGroup(16);
+   
+       @Override
+       protected void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
+   
+       }
+   
+   
+       @Override
+       public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+           group.submit(() -> {
+               ByteBuf buf = (ByteBuf) msg;
+               byte[] data = new byte[buf.readableBytes()];
+               buf.readBytes(data);
+               try {
+                   String dataStr = new String(data,"utf-8");
+                   Thread.sleep(10 * 1000);
+                   ctx.channel().writeAndFlush(dataStr);
+               } catch (Exception e) {
+                   e.printStackTrace();
+               }
+           });
+       }
+   
+       @Override
+       public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+           ctx.flush();
+       }
+   
+       @Override
+       public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+           ctx.close();
+       }
+   }
+   
+   // AbstractChannelHandlerContext类下的 write方法
+   //1) 当判定下个 outbound 的 executor 线程不是当前线程的时候，会将当前的工作封装成 task ，然后放入 mpsc 队列中，等待 IO 任务执行完毕后执行队列中的任务。 
+   //2) 当我们使用了 group.submit(new Callable<Object>(){} 在 handler 中 加 入 线 程 池 ， 就 会 进 入 到 safeExecute(executor, task,promise, m); 如果去掉这段代码，而使用普通方式来执行耗时的业务，那么就不会进入到 safeExecute(executor,task, promise, m);
+   private void write(Object msg, boolean flush, ChannelPromise promise) {
+       AbstractChannelHandlerContext next = findContextOutbound();
+       final Object m = pipeline.touch(msg, next);
+       EventExecutor executor = next.executor();
+       if (executor.inEventLoop()) {
+           if (flush) {
+               next.invokeWriteAndFlush(m, promise);
+           } else {
+               next.invokeWrite(m, promise);
+           }
+       } else {
+           final AbstractWriteTask task;
+           if (flush) {
+               task = WriteAndFlushTask.newInstance(next, m, promise);
+           }  else {
+               task = WriteTask.newInstance(next, m, promise);
+           }
+           if (!safeExecute(executor, task, promise, m)) {
+               task.cancel();
+           }
+       }
+   }
+   ```
+
+4) 处理耗时业务的第二种方式---Context 中添加线程池
+
+   ```java
+   // pipeline.addLast(group,new EventExcutorHandler()); 重点！
+   public class NettyServer {
+   
+       private static final EventExecutorGroup group = new DefaultEventLoopGroup(16);
+       private static final Integer PORT = 7777;
+   
+       public static void main(String[] args) {
+           NioEventLoopGroup boss = new NioEventLoopGroup(1);
+           NioEventLoopGroup worker = new NioEventLoopGroup();
+   
+           try{
+               ServerBootstrap bootstrap = new ServerBootstrap();
+               bootstrap.group(boss,worker)
+                       .channel(ServerSocketChannel.class)
+                       .option(ChannelOption.SO_BACKLOG,128)
+                       .childOption(ChannelOption.SO_KEEPALIVE,true)
+                       .childHandler(new ChannelInitializer<SocketChannel>() {
+                           @Override
+                           protected void initChannel(SocketChannel ch){
+                               ChannelPipeline pipeline = ch.pipeline();
+                               pipeline.addLast(group,new EventExcutorHandler());
+                           }
+                       });
+               ChannelFuture sync = bootstrap.bind(PORT).sync();
+               sync.channel().closeFuture().sync();
+           }catch (Exception e){
+               e.printStackTrace();
+           }finally {
+               worker.shutdownGracefully();
+               boss.shutdownGracefully();
+           }
+       }
+   }
+   
+   // 在handler中加入group线程池，会在executor.inEventLoop()中判断是否含有线程池，是的话会进入next.invokeChannelRead(m);
+   static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
+       final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
+       EventExecutor executor = next.executor();
+       if (executor.inEventLoop()) {
+           next.invokeChannelRead(m);
+       } else {
+           executor.execute(new Runnable() {
+               @Override
+               public void run() {
+                   next.invokeChannelRead(m);
+               }
+           });
+       }
+   }
+   ```
+
+##### 要如何选择两种方式？
+
+1) 第一种方式在 handler 中添加异步，可能更加的自由，比如如果需要访问数据库，那我就异步，如果不需 要，就不异步，异步会拖长接口响应时间。因为需要将任务放进 mpscTask 中。如果 IO 时间很短，task 很多，可能一个循环下来，都没时间执行整个 task，导致响应时间达不到指标。 
+
+2) 第二种方式是 Netty 标准方式(即加入到队列)，但是，这么做会将整个 handler 都交给业务线程池。不论耗时不耗时，都加入到队列里，不够灵活。 
+
+3) 各有优劣，从灵活性考虑，第一种较好
 
 ### 实现类讲解
 
@@ -538,6 +1076,21 @@ Netty 在创建Channel 实例后，一 般都需要设置ChannelOption 参数
 + BossEventLoopGroup通常是一个 单线程的EventLoop, EventLoop 维护着一个注册了ServerSocketChannel的Selector实例BossEventLoop不断轮询Selector将连接事件分离出来
 + 通常是OP ACCEPT事件，然后将接收到的SocketChannel交给WorkerEventLoopGroup
 + WorkerEventLoopGroup会由next选择其中一个EventLoop来将这个SocketChannel注册到其维护的Selector并对其后续的I/O事件进行处
+
+##### EventLoop
+
+**EventLoop** **作为** **Netty** **的核心的运行机制 小结** 
+
+1) 每次执行 ececute 方法都是向队列中添加任务。当第一次添加时就启动线程，执行 run 方法，而 run 方法 
+
+是整个 EventLoop 的核心，就像 EventLoop 的名字一样，Loop Loop ，不停的 Loop ，Loop 做什么呢？做 3 件 
+
+事情。 
+
++ 调用 selector 的 select 方法，默认阻塞一秒钟，如果有定时任务，则在定时任务剩余时间的基础上在加上 0.5 秒进行阻塞。当执行 execute 方法的时候，也就是添加任务的时候，唤醒 selecor，防止 selecotr 阻塞时间过 长。 
+
++ 当 selector 返回的时候，回调用 processSelectedKeys 方法对 selectKey 进行处理。 
++ 当 processSelectedKeys 方法执行结束后，则按照 ioRatio 的比例执行 runAllTasks 方法，默认是 IO 任务时间 和非 IO 任务时间是相同的，你也可以根据你的应用特点进行调优 。比如 非 IO 任务比较多，那么你就将ioRatio 调小一点，这样非 IO 任务就能执行的长一点。防止队列积攒过多的任务。
 
 #### Unpooled
 
