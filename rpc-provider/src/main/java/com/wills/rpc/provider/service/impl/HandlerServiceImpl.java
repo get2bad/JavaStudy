@@ -1,7 +1,5 @@
 package com.wills.rpc.provider.service.impl;
 
-
-import com.alibaba.fastjson.JSON;
 import com.wills.api.HandlerService;
 import com.wills.entity.Response;
 import com.wills.entity.User;
@@ -27,12 +25,12 @@ public class HandlerServiceImpl implements HandlerService {
     public String addUser(User user) {
         List<User> instance = Singleton.getUserInstance();
         instance.add(user);
-        return Response.ok("OK");
+        return Response.ok(user);
     }
 
     @Override
     public String getAllUser() {
         List<User> instance = Singleton.getUserInstance();
-        return Response.ok(JSON.toJSONString(instance));
+        return Response.ok(instance);
     }
 }

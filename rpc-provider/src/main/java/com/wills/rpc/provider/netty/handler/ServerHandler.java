@@ -91,18 +91,29 @@ public class ServerHandler extends SimpleChannelInboundHandler<String> implement
             throw new RuntimeException("服务端找不到这个bean");
         }
 
-        // 通过反射调用bean方法
-        FastClass fastClass = FastClass.create(bean.getClass());
-
-        FastMethod method = fastClass.getMethod(request.getMethodName(), request.getParameterTypes());
-
         try {
+            // 通过反射调用bean方法
+            Class<?> clazz = bean.getClass();
+            Method method = clazz.getMethod(request.getMethodName(), request.getParameterTypes());
             // 调用方法，返回方法调用后的值
-            return method.invoke(bean, request.getParameters());
+            Object[] parameters = request.getParameters();
+            // BUG发现并解决！ 这里出错了！ 导致JSON无法转化为目标类，解决方法就是来一次强转即可
+            if(method.getParameterTypes()!= null && method.getParameterTypes().length != 0){
+                Class<?>[] parameterTypes = method.getParameterTypes();
+                for (int i = 0; i < parameters.length; i++) {
+                    parameters[i] = JSON.parseObject(JSON.toJSONString(parameters[i]),parameterTypes[i]);
+                }
+            }
+            return method.invoke(bean,parameters);
         } catch (Exception e) {
-            e.printStackTrace();
+            e.getCause().printStackTrace();
         }
         return null;
     }
 
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        cause.printStackTrace();
+        ctx.close();
+    }
 }

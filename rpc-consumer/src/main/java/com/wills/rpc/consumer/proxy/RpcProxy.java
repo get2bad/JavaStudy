@@ -1,6 +1,7 @@
 package com.wills.rpc.consumer.proxy;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.wills.entity.Request;
 import com.wills.entity.Response;
 import com.wills.entity.User;
@@ -8,9 +9,7 @@ import com.wills.rpc.consumer.netty.NettyClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
+import java.lang.reflect.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -38,6 +37,7 @@ public class RpcProxy {
             proxy = Proxy.newProxyInstance(this.getClass().getClassLoader(), new Class[]{serviceClass}, new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                    // 构造返回
                     Request request = new Request();
                     request.setRequestId(UUID.randomUUID().toString().replace("-",""));
                     request.setClassName(method.getDeclaringClass().getName());
@@ -46,15 +46,21 @@ public class RpcProxy {
                     request.setParameterTypes(method.getParameterTypes());
 
                     // 发送消息
-                    Object send = client.send(JSON.toJSONString(request));
+                    String msg = JSON.toJSONString(request);
+                    Object send = client.send(msg);
                     // 拿到返回的结果
                     Response response = JSON.parseObject(send.toString(), Response.class);
                     if(response != null && response.getCode() != 200){
                         // 出现错误
                         throw new RuntimeException(response.getMsg());
                     }
-                    // 拿到返回的数据 进行返回
-                    return JSON.parseObject(response.getData().toString(), method.getReturnType());
+
+                    if(response!= null && response.getData() != null){
+                        // 拿到返回的数据 进行返回
+                        return JSON.parseObject(response.getData().toString(), method.getReturnType());
+                    } else {
+                        return Response.ok();
+                    }
                 }
             });
             SERVICE_PROXY.put(serviceClass, proxy);

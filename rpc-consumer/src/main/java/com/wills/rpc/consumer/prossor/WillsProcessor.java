@@ -36,6 +36,7 @@ public class WillsProcessor implements BeanPostProcessor {
         Field[] fields = bean.getClass().getDeclaredFields();
 
         for (Field field : fields) {
+            // 包含 @RpcReturn 注解的就进行注入处理
             if (field.getAnnotation(RpcReturn.class) != null) {
                 // 获取代理对象
                 Object target = this.proxy.getProxy(field.getType());
@@ -43,7 +44,7 @@ public class WillsProcessor implements BeanPostProcessor {
                     // 设置相关属性 属性注入
                     field.setAccessible(true);
                     field.set(bean, target);
-                } catch (IllegalAccessException e) {
+                } catch (Exception e) {
                     e.printStackTrace();
                 }
             }

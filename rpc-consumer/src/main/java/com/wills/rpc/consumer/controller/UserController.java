@@ -1,7 +1,6 @@
 package com.wills.rpc.consumer.controller;
 
 import com.wills.api.HandlerService;
-import com.wills.entity.Response;
 import com.wills.entity.User;
 import com.wills.rpc.consumer.annotation.RpcReturn;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +34,6 @@ public class UserController {
         Random r = new Random();
         User user = new User(r.nextInt(1000),name,age);
         String res = service.addUser(user);
-        return Response.ok(res);
+        return res;
     }
 }
