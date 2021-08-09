@@ -68,12 +68,27 @@
             * [服务端](#服务端-1)
             * [客户端](#客户端-2)
             * [效果图](#效果图-2)
+         * [简易RPC](#简易rpc)
+            * [通用类模块](#通用类模块)
+            * [生产者模块(服务被调用者)](#生产者模块服务被调用者)
+               * [步骤](#步骤)
+                  * [1. 实现通用类下面的接口](#1-实现通用类下面的接口)
+                  * [2. 实现Netty以及处理类](#2-实现netty以及处理类)
+            * [消费者模块(服务调用者)](#消费者模块服务调用者)
+               * [步骤](#步骤-1)
+                  * [1. 暴露接口级注解实现](#1-暴露接口级注解实现)
+                  * [2. 实现Netty以及处理类](#2-实现netty以及处理类-1)
+                  * [3. 代理类实现](#3-代理类实现)
+                  * [4. 处理类实现](#4-处理类实现)
+            * [效果图](#效果图-3)
    * [Thread](#thread)
    * [BigData](#bigdata)
       * [Hive](#hive)
       * [HBase](#hbase)
       * [Spark](#spark)
       * [Flink](#flink)
+
+
 
 # Java集合
 
@@ -1292,6 +1307,8 @@ public class MyObjectDecoder extends ReplayingDecoder<Void> {
 
 ##### 步骤
 
+> 基本步骤就是，使用@Rpc注解(作用范围是类上)，实现rpc-common包下面的HandlerService接口，重写其方法，然后将@Rpc注解写到这个类上面，别的东西就按springboot开发项目来搞定，特别就是 服务器netty的处理类继承ApplicationContextAware(当容器就绪以后，调用这个接口实现类下的setApplicationContext方法)，用途是缓存@Rpc类的bean，然后在接收到客户端发送的消息时，调用自己写的handler方法，该方法就是使用反射创建上面缓存的bean类中的方法，进行值返回,然后回馈客户端([见后文](#消费者模块(服务调用者)))
+
 ###### 1. 实现通用类下面的接口
 
 [HandlerServiceImpl](./rpc-provider/src/main/java/com/wills/rpc/provider/service/impl/HandlerServiceImpl.java)
@@ -1323,6 +1340,8 @@ public class MyObjectDecoder extends ReplayingDecoder<Void> {
 > processor: 注入Bean处理，在每次调用方法时，会自动调用这个postProcessAfterInitialization重写的方法
 
 ##### 步骤
+
+> 基本的步骤就是，使用@RpcReturn注解(作用范围是类中的字段)，然后在处理类中 实现 BeanPostProcessor 接口，该接口的意义就是bean在注入后调用的方法，将添加了@RpcReturn注解的bean中的字段，进行代理，代理以后进行字段注入, 在代理类中创建一个 getProxy方法，进行相关的判断，如果代理类没有被缓存过，那么就进行使用 Proxy.newProxyInstance方法进行代理创建，如果被调用 invoke 了以后，就会进行发送 rpc请求，达到了进行rpc请求远程类，达到了无感请求rpc的效果
 
 ###### 1. 暴露接口级注解实现
 
