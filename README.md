@@ -1260,13 +1260,101 @@ public class MyObjectDecoder extends ReplayingDecoder<Void> {
 
 
 
+### 简易RPC
+
+> 本案例是基于 springboot 网络项目来设计，分为三个模块：
+>
+> + rpc-common
+>
+>   > 通用类/工具集的模块
+>
+> + rpc-producer
+>
+>   > 服务被调用者模块
+>
+> + rpc-consumer
+>
+>   > 服务调用者模块
+
+#### 通用类模块
+
+>  本类中主要写了一些公用的类，比如说api包下的调用的 HandlerService接口，以及entity下使用的通用的实体类等。
+
+#### 生产者模块(服务被调用者)
+
+> Annotation: 模块中使用的注解
+>
+> entity： 模块使用的实体类
+>
+> Netty: RPC模块的基石
+>
+> Service: 实现了rpc-common通用模块api包下的HandlerService类
+
+##### 步骤
+
+###### 1. 实现通用类下面的接口
+
+[HandlerServiceImpl](./rpc-provider/src/main/java/com/wills/rpc/provider/service/impl/HandlerServiceImpl.java)
+
+[实现接口类下用到的注解- @Rpc](./rpc-provider/src/main/java/com/wills/rpc/provider/annotation/RPC.java)
+
+[项目临时存储(使用自旋锁实现的单例模式实体类)](./rpc-provider/src/main/java/com/wills/rpc/provider/entity/Singleton.java)
+
+###### 2. 实现Netty以及处理类
+
+[服务器类](./rpc-provider/src/main/java/com/wills/rpc/provider/netty/NettyServer.java)
+
+[服务器处理类](./rpc-provider/src/main/java/com/wills/rpc/provider/netty/handler/ServerHandler.java)
+
+#### 消费者模块(服务调用者)
+
+> Annotation: 模块中使用的注解
+>
+> entity： 模块使用的实体类
+>
+> Netty: RPC模块的基石
+>
+> Service: 实现了rpc-common通用模块api包下的HandlerService类
+>
+> Controller: 暴露到web上的接口，提供用户增加/查询功能
+>
+> proxy: 代理类的实现，用于构造代理类，使用注解后，自动添加代理向 服务提供者进行相关请求
+>
+> processor: 注入Bean处理，在每次调用方法时，会自动调用这个postProcessAfterInitialization重写的方法
+
+##### 步骤
+
+###### 1. 暴露接口级注解实现
+
+[暴露接口](./rpc-consumer/src/main/java/com/wills/rpc/consumer/controller/UserController.java)
+
+[注解@RpcReturn](./rpc-consumer/src/main/java/com/wills/rpc/consumer/annotation/RpcReturn.java)
+
+###### 2. 实现Netty以及处理类
+
+[客户端类](./rpc-consumer/src/main/java/com/wills/rpc/consumer/netty/NettyClient.java)
+
+[客户端处理类](./rpc-consumer/src/main/java/com/wills/rpc/consumer/netty/handler/ClientHandler.java)
+
+###### 3. 代理类实现
+
+[代理类RpcProxy](./rpc-consumer/src/main/java/com/wills/rpc/consumer/proxy/RpcProxy.java)
+
+###### 4. 处理类实现
+
+[处理类](./rpc-consumer/src/main/java/com/wills/rpc/consumer/prossor/WillsProcessor.java)
+
+#### 效果图
+
+![](http://image.tinx.top/20210809152356.png)
 
 
 
+![](http://image.tinx.top/20210809152435.png)
 
 
 
-
+![](http://image.tinx.top/20210809152457.png)
 
 
 
